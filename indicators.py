@@ -14,8 +14,6 @@ PRICE_HISTORY_COLUMNS = [
     "date", "ticker", "company_name", "sector", "industry",
     "open", "high", "low", "close", "volume",
     "volume_30d_avg", "volume_ratio",
-    "market_cap_cr", "pe_ratio", "roe_pr", "profit_margin_pr",
-    "debt_to_equity", "week52_high", "week52_low",
     "nifty_index_close", "sma_20", "sma_50", "sma_200", "ema_20",
     "rsi_14", "macd", "macd_signal", "macd_hist",
     "bb_upper", "bb_lower", "bb_mid",
@@ -36,15 +34,37 @@ def fetch_ticker_info(engine, ticker: str) -> dict:
         "market_cap_cr": None, "pe_ratio": None,
         "roe_pr": None, "profit_margin_pr": None,
         "debt_to_equity": None, "week52_high": None, "week52_low": None,
+        "volume_ratio": None, "revenue_signal": None,
     }
 
     ticker_key = ticker.replace(".NS", "")
-    selected_columns = ", ".join(defaults.keys())
 
     for table_name in ("stock_data", "raw_stock_data"):
         if not inspect(engine).has_table(table_name):
             print(f"    ⚠️  Table {table_name} does not exist — skipping")
             continue
+
+        with engine.connect() as conn:
+            table_columns = {
+                row[0]
+                for row in conn.execute(
+                    text(
+                        """
+                        SELECT column_name
+                        FROM information_schema.columns
+                        WHERE table_schema = 'public' AND table_name = :table_name
+                        """
+                    ),
+                    {"table_name": table_name},
+                ).fetchall()
+            }
+
+        selected = [col for col in defaults.keys() if col in table_columns]
+        if not selected:
+            print(f"    ⚠️  No usable metadata columns found in {table_name}")
+            continue
+
+        selected_columns = ", ".join(selected)
 
         query = text(f"""
             SELECT {selected_columns}
@@ -64,7 +84,7 @@ def fetch_ticker_info(engine, ticker: str) -> dict:
                     values[key] = default_value
             return values
         else:
-            print(f"    ⚠️  No metadata row found in {table_name} for ticker={ticker_key}")
+            print(f"⚠️ No metadata row found in {table_name} for ticker={ticker_key}")
 
     print(f"    ❌ No metadata found anywhere — using defaults for {ticker_key}")
     return defaults
@@ -178,7 +198,7 @@ def compute_indicators(price_frame: pd.DataFrame, benchmark_frame: pd.DataFrame)
     if frame.empty:
         return frame
 
-    frame["volume_30d_avg"] = frame["volume"].shift(1).rolling(window=30, min_periods=30).mean()
+    frame["volume_30d_avg"] = frame["volume"].shift(1).rolling(window=30, min_periods=1).mean()
     frame["volume_ratio"] = frame["volume"] / frame["volume_30d_avg"]
     frame["sma_20"]  = frame["close"].rolling(window=20,  min_periods=20).mean()
     frame["sma_50"]  = frame["close"].rolling(window=50,  min_periods=50).mean()
@@ -263,13 +283,6 @@ def build_output_rows(
     merged["company_name"]    = metadata["company_name"]
     merged["sector"]          = metadata["sector"]
     merged["industry"]        = metadata["industry"]
-    merged["market_cap_cr"]   = metadata["market_cap_cr"]
-    merged["pe_ratio"]        = metadata["pe_ratio"]
-    merged["roe_pr"]          = metadata["roe_pr"]
-    merged["profit_margin_pr"]= metadata["profit_margin_pr"]
-    merged["debt_to_equity"]  = metadata["debt_to_equity"]
-    merged["week52_high"]     = metadata["week52_high"]
-    merged["week52_low"]      = metadata["week52_low"]
 
     print(f"    📋 Merged rows before date filter: {len(merged)}")
     print(f"    📋 last_stored_date={last_stored_date}")
@@ -300,7 +313,38 @@ def build_output_rows(
     pct = pd.to_numeric(merged["vs_nifty_pct"], errors="coerce")
     merged["vs_nifty_cumulative"] = (last_cumulative + pct.fillna(0).cumsum()).round(2)
 
+    # Align latest inserted row with today's cleaned snapshot from stock_data.
+    latest_idx = merged["date"].idxmax() if not merged.empty else None
+    if latest_idx is not None:
+        stock_volume_ratio = pd.to_numeric(metadata.get("volume_ratio"), errors="coerce")
+        if pd.notna(stock_volume_ratio):
+            merged.loc[latest_idx, "volume_ratio"] = round(float(stock_volume_ratio), 2)
+
     merged = merged.sort_values("date").reset_index(drop=True)
+    # Enforce SMA nulling until sufficient historical rows exist.
+    # Calculate current DB count for this ticker and mark SMA columns as NA
+    try:
+        existing_count = 0
+        if inspect(engine).has_table("price_history"):
+            with engine.connect() as conn:
+                cnt = conn.execute(
+                    text("SELECT COUNT(*) FROM price_history WHERE ticker = :ticker"),
+                    {"ticker": ticker.replace(".NS", "")},
+                ).scalar()
+                existing_count = int(cnt) if cnt is not None else 0
+
+        # overall index for each new row when appended to existing history
+        merged["_overall_idx"] = (merged.reset_index().index + 1) + existing_count
+
+        for w in (20, 50, 200):
+            col = f"sma_{w}"
+            if col in merged.columns:
+                merged.loc[merged["_overall_idx"] < w, col] = pd.NA
+
+        merged = merged.drop(columns=[c for c in ("_overall_idx",) if c in merged.columns])
+    except Exception:
+        # Non-fatal: if DB query fails, leave computed SMAs as-is
+        pass
     return merged
 
 
@@ -407,9 +451,10 @@ def main() -> None:
     engine     = get_engine()
 
     # run schema migration before anything else
-    from db_bootstrap import backfill_vs_nifty_cumulative, migrate_price_history_schema
+    from db_bootstrap import backfill_vs_nifty_cumulative, clear_price_history_snapshot_columns, migrate_price_history_schema
     migrate_price_history_schema(engine)
     backfill_vs_nifty_cumulative(engine)
+    clear_price_history_snapshot_columns(engine)
 
     tickers    = get_nifty50_tickers()
 

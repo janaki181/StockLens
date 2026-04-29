@@ -13,6 +13,10 @@ load_dotenv()
 
 def setup_logging() -> None:
     """Configure rotating file handler: keeps 8 weeks of history, rotates weekly."""
+    root_logger = logging.getLogger()
+    if any(isinstance(handler, TimedRotatingFileHandler) for handler in root_logger.handlers):
+        return
+
     handler = TimedRotatingFileHandler(
         filename="pipeline.log",
         when="W0",          # rotate every Monday
@@ -22,8 +26,8 @@ def setup_logging() -> None:
     handler.setFormatter(logging.Formatter(
         "%(asctime)s | %(levelname)s | %(message)s"
     ))
-    logging.getLogger().setLevel(logging.INFO)
-    logging.getLogger().addHandler(handler)
+    root_logger.setLevel(logging.INFO)
+    root_logger.addHandler(handler)
 
 
 def get_database_url() -> str:
@@ -86,6 +90,7 @@ def migrate_price_history_schema(engine) -> None:
     expected_columns = {
         "nifty_index_close": "FLOAT",
         "vs_nifty_cumulative": "FLOAT",
+        "revenue_signal": "VARCHAR(20)",
         # add future new columns here as you build the project
     }
 
@@ -134,6 +139,46 @@ def migrate_stock_table_schema(engine) -> None:
             logging.info("Migrated stock_data: added revenue_signal column")
 
 
+def clear_price_history_snapshot_columns(engine) -> None:
+    """Null out snapshot-only columns from price_history so it stays historical-only."""
+    from sqlalchemy import inspect, text
+
+    if not inspect(engine).has_table("price_history"):
+        return
+
+    snapshot_columns = [
+        "market_cap_cr",
+        "pe_ratio",
+        "roe_pr",
+        "profit_margin_pr",
+        "debt_to_equity",
+        "week52_high",
+        "week52_low",
+        "revenue_signal",
+    ]
+
+    with engine.connect() as conn:
+        existing = {
+            row[0]
+            for row in conn.execute(text("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'price_history'
+            """)).fetchall()
+        }
+
+    columns_to_clear = [column for column in snapshot_columns if column in existing]
+    if not columns_to_clear:
+        return
+
+    set_clause = ", ".join(f'"{column}" = NULL' for column in columns_to_clear)
+
+    with engine.begin() as conn:
+        conn.execute(text(f"UPDATE price_history SET {set_clause}"))
+
+    logging.info("Cleared snapshot-only columns from price_history")
+
+
 def backfill_vs_nifty_cumulative(engine) -> None:
     """Backfill missing cumulative outperformance values using existing daily vs_nifty_pct."""
     from sqlalchemy import inspect, text
@@ -177,3 +222,5 @@ def backfill_vs_nifty_cumulative(engine) -> None:
 
     print(f"✅ Backfilled vs_nifty_cumulative for {missing} existing rows")
     logging.info(f"Backfilled vs_nifty_cumulative for {missing} rows")
+
+

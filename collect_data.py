@@ -59,15 +59,12 @@ def save_raw_data(df: pd.DataFrame) -> None:
     engine = get_engine()
     migrate_raw_table_schema(engine)
 
-    run_date = pd.to_datetime(df["date"].iloc[0]).date()
     if inspect(engine).has_table("raw_stock_data"):
         with engine.begin() as conn:
-            conn.execute(
-                text("DELETE FROM raw_stock_data WHERE DATE(date) = :run_date"),
-                {"run_date": run_date},
-            )
+            conn.execute(text("DELETE FROM raw_stock_data"))
 
     df.to_sql("raw_stock_data", con=engine, if_exists="append", index=False)
+    run_date = pd.to_datetime(df["date"].iloc[0]).date()
     logging.info(f"Saved {len(df)} raw rows to raw_stock_data for {run_date}")
     print(f"✅ Saved {len(df)} raw rows for {run_date} to PostgreSQL table raw_stock_data")
 

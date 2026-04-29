@@ -28,16 +28,33 @@ def render_page5(stock, price, vol_min: float):
     alerts["volume_ratio"] = pd.to_numeric(alerts.get("volume_ratio"), errors="coerce")
     alerts["rsi_14"] = pd.to_numeric(alerts.get("rsi_14"), errors="coerce")
 
-    # Try to enrich RSI from latest price_history row when not in stock_data.
-    if "rsi_14" not in stock.columns and price is not None and not price.empty:
-        latest_rsi = (
-            price.sort_values("date")
+    if price is not None and not price.empty:
+        latest_price = (
+            price.copy()
+            .assign(date=pd.to_datetime(price.get("date"), errors="coerce"))
+            .dropna(subset=["date"]) 
+            .sort_values("date")
             .groupby("ticker", as_index=False)
-            .tail(1)[["ticker", "rsi_14"]]
-            .rename(columns={"rsi_14": "rsi_latest"})
+            .tail(1)[["ticker", "date", "volume_ratio", "rsi_14"]]
+            .rename(
+                columns={
+                    "date": "indicator_date",
+                    "volume_ratio": "volume_ratio_latest",
+                    "rsi_14": "rsi_latest",
+                }
+            )
         )
-        alerts = alerts.merge(latest_rsi, on="ticker", how="left")
-        alerts["rsi_14"] = alerts["rsi_14"].fillna(alerts["rsi_latest"])
+        alerts = alerts.merge(latest_price, on="ticker", how="left")
+        alerts["volume_ratio"] = pd.to_numeric(alerts["volume_ratio_latest"], errors="coerce").fillna(alerts["volume_ratio"])
+        alerts["rsi_14"] = pd.to_numeric(alerts["rsi_latest"], errors="coerce").fillna(alerts["rsi_14"])
+
+        latest_market_date = pd.to_datetime(latest_price["indicator_date"], errors="coerce").max()
+        alerts["rsi_is_stale"] = False
+        if pd.notna(latest_market_date):
+            indicator_dates = pd.to_datetime(alerts.get("indicator_date"), errors="coerce")
+            alerts["rsi_is_stale"] = indicator_dates.isna() | (indicator_dates < latest_market_date)
+    else:
+        alerts["rsi_is_stale"] = False
 
     filtered = alerts[alerts["volume_ratio"] >= vol_min].copy()
 
@@ -95,6 +112,7 @@ def _alerts_table(df):
     rows = []
     for _, row in df.iterrows():
         rsi_value = row.get("rsi_14")
+        is_stale = bool(row.get("rsi_is_stale", False))
         if pd.notna(rsi_value):
             if rsi_value >= 70:
                 rsi_color = "#e76f51"
@@ -103,6 +121,9 @@ def _alerts_table(df):
             else:
                 rsi_color = "#1f2d3d"
             rsi_text = f"{rsi_value:.1f}"
+            if is_stale:
+                rsi_text = f"{rsi_text} (stale)"
+                rsi_color = "#8d99ae"
         else:
             rsi_color = "#888"
             rsi_text = "NA"

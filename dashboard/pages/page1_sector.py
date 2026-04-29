@@ -193,7 +193,7 @@ def _company_table(df, sector_filter=None, company_filter=None):
     if company_filter:
         frame = frame[frame["ticker"].isin(company_filter)]
 
-    frame = frame.sort_values("market_cap_cr", ascending=False).head(14)
+    frame = frame.sort_values("market_cap_cr", ascending=False)
     if frame.empty:
         return html.Div("No companies match selected filters.", style={"color": "#7a8793", "padding": "8px"})
 

@@ -1,4 +1,5 @@
 import logging
+from datetime import timedelta
 
 import pandas as pd
 from sqlalchemy import inspect, text
@@ -106,7 +107,6 @@ def add_revenue_signal(df: pd.DataFrame) -> pd.DataFrame:
 
     return cleaned
 
-
 def clean_stock_data(raw_df: pd.DataFrame) -> pd.DataFrame:
     cleaned = normalize_types(raw_df)
     cleaned = fill_sector_medians(cleaned)
@@ -120,10 +120,18 @@ def save_clean_data(df: pd.DataFrame, engine) -> None:
         return
 
     migrate_stock_table_schema(engine)
-
+ 
     run_dates = [pd.to_datetime(value).date() for value in df["date"].dropna().unique()]
     if inspect(engine).has_table("stock_data"):
         with engine.begin() as conn:
+            # Delete records older than 3 days to keep only latest 3 days
+            if run_dates:
+                cutoff_date = max(run_dates) - timedelta(days=2)
+                conn.execute(
+                    text("DELETE FROM stock_data WHERE DATE(date) < :cutoff_date"),
+                    {"cutoff_date": cutoff_date},
+                )
+            # Delete today's data before inserting to avoid duplicates
             for run_date in run_dates:
                 conn.execute(
                     text("DELETE FROM stock_data WHERE DATE(date) = :run_date"),

@@ -13,6 +13,22 @@ group by ticker;
 
 drop database nifty_competitor_analysis;
 
-SELECT datname FROM ;
+SELECT datname FROM pg_database;
 
-SHOW DATABASES;
+SELECT current_database();
+SELECT DISTINCT date
+FROM price_history
+ORDER BY date DESC;
+
+SELECT DISTINCT date
+FROM stock_data
+ORDER BY date DESC;
+
+SELECT * FROM price_history 
+WHERE DATE(date) = CURRENT_DATE;
+
+SELECT * FROM stock_data 
+WHERE DATE(date) = CURRENT_DATE-2;
+
+select * from price_history
+where ticker = 'AXISBANK';
