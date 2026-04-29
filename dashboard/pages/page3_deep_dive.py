@@ -39,6 +39,32 @@ def render_page3(price, tickers):
     fig_price = px.line(data, x="date", y="close", color="ticker")
     fig_price.update_yaxes(title_text="Close")
 
+    focus_price = data[data["ticker"] == selected[0]].copy().sort_values("date")
+    fig_bb = px.line(focus_price, x="date", y="close", title=f"Bollinger Bands - {selected[0]}")
+    if not focus_price.empty and {"bb_upper", "bb_lower", "bb_mid"}.issubset(focus_price.columns):
+        fig_bb.add_scatter(
+            x=focus_price["date"],
+            y=focus_price["bb_upper"],
+            mode="lines",
+            name="BB Upper",
+            line={"dash": "dot", "color": "#adb5bd", "width": 1},
+        )
+        fig_bb.add_scatter(
+            x=focus_price["date"],
+            y=focus_price["bb_lower"],
+            mode="lines",
+            name="BB Lower",
+            line={"dash": "dot", "color": "#adb5bd", "width": 1},
+        )
+        fig_bb.add_scatter(
+            x=focus_price["date"],
+            y=focus_price["bb_mid"],
+            mode="lines",
+            name="SMA 20",
+            line={"dash": "dash", "color": "#f76707", "width": 1},
+        )
+    fig_bb.update_yaxes(title_text="Price")
+
     vol = data[["date", "ticker", "volume", "volume_30d_avg"]].copy()
     fig_vol = make_subplots(specs=[[{"secondary_y": True}]])
     for ticker in selected:
@@ -69,6 +95,7 @@ def render_page3(price, tickers):
         [
             dcc.Graph(figure=_layout(fig_price, "Price Trend (Multi-Company)", 300), config={"displaylogo": False}),
             dcc.Graph(figure=_layout(fig_vol, "Volume vs 30-Day Average", 300), config={"displaylogo": False}),
+            dcc.Graph(figure=_layout(fig_bb, f"Bollinger Bands - {selected[0]}", 300), config={"displaylogo": False}),
             dcc.Graph(figure=_layout(fig_ind, "Technical Indicators", 300), config={"displaylogo": False}),
         ]
     )

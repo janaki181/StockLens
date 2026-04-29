@@ -90,7 +90,6 @@ def migrate_price_history_schema(engine) -> None:
     expected_columns = {
         "nifty_index_close": "FLOAT",
         "vs_nifty_cumulative": "FLOAT",
-        "revenue_signal": "VARCHAR(20)",
         # add future new columns here as you build the project
     }
 
@@ -222,5 +221,3 @@ def backfill_vs_nifty_cumulative(engine) -> None:
 
     print(f"✅ Backfilled vs_nifty_cumulative for {missing} existing rows")
     logging.info(f"Backfilled vs_nifty_cumulative for {missing} rows")
-
-

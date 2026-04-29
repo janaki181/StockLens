@@ -5,7 +5,7 @@ import pandas as pd
 import yfinance as yf
 from sqlalchemy import inspect, text
 
-from collect_data import get_nifty50_tickers
+from data_pipeline.collect_data import get_nifty50_tickers
 from db_bootstrap import ensure_database_exists, get_engine, setup_logging
 
 setup_logging()
@@ -30,11 +30,9 @@ CONTEXT_LIMIT = 250
 def fetch_ticker_info(engine, ticker: str) -> dict:
     defaults = {
         "company_name": ticker.replace(".NS", ""),
-        "sector": None, "industry": None,
-        "market_cap_cr": None, "pe_ratio": None,
-        "roe_pr": None, "profit_margin_pr": None,
-        "debt_to_equity": None, "week52_high": None, "week52_low": None,
-        "volume_ratio": None, "revenue_signal": None,
+        "sector": None,
+        "industry": None,
+        "volume_ratio": None,
     }
 
     ticker_key = ticker.replace(".NS", "")
@@ -451,10 +449,9 @@ def main() -> None:
     engine     = get_engine()
 
     # run schema migration before anything else
-    from db_bootstrap import backfill_vs_nifty_cumulative, clear_price_history_snapshot_columns, migrate_price_history_schema
+    from db_bootstrap import backfill_vs_nifty_cumulative, migrate_price_history_schema
     migrate_price_history_schema(engine)
     backfill_vs_nifty_cumulative(engine)
-    clear_price_history_snapshot_columns(engine)
 
     tickers    = get_nifty50_tickers()
 

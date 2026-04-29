@@ -1,7 +1,8 @@
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from dash import Input, Output, dcc, html
+import dash
+from dash import Input, Output, State, dcc, html
 from plotly.subplots import make_subplots
 
 SECTOR_COLORS = {
@@ -23,6 +24,8 @@ SIGNAL_COLORS = {
     "Flat": "#8d99ae",
     "No Data": "#6c757d",
 }
+
+PAGE_SIZE = 12
 
 
 def _clean_signal(value):
@@ -184,7 +187,7 @@ def _build_signal_donut(stock):
     return _light_layout(fig, "Revenue Signal Distribution", height=320)
 
 
-def _company_table(df, sector_filter=None, company_filter=None):
+def _company_table(df, sector_filter=None, company_filter=None, signal_filter=None, page_index=0, page_size=PAGE_SIZE):
     frame = df.copy()
     frame["signal_label"] = frame["revenue_signal"].apply(_clean_signal)
 
@@ -192,10 +195,20 @@ def _company_table(df, sector_filter=None, company_filter=None):
         frame = frame[frame["sector"].isin(sector_filter)]
     if company_filter:
         frame = frame[frame["ticker"].isin(company_filter)]
+    if signal_filter:
+        frame = frame[frame["signal_label"].isin(signal_filter)]
 
     frame = frame.sort_values("market_cap_cr", ascending=False)
     if frame.empty:
-        return html.Div("No companies match selected filters.", style={"color": "#7a8793", "padding": "8px"})
+        empty = html.Div("No companies match selected filters.", style={"color": "#7a8793", "padding": "8px"})
+        return empty, "Showing 0 of 0 companies", True, True, 0
+
+    total_rows = len(frame)
+    total_pages = max(1, (total_rows + page_size - 1) // page_size)
+    page_index = max(0, min(int(page_index or 0), total_pages - 1))
+    start = page_index * page_size
+    end = start + page_size
+    frame = frame.iloc[start:end]
 
     header_style = {
         "padding": "8px 10px",
@@ -240,7 +253,7 @@ def _company_table(df, sector_filter=None, company_filter=None):
             )
         )
 
-    return html.Table(
+    table = html.Table(
         [
             html.Thead(
                 html.Tr(
@@ -258,20 +271,24 @@ def _company_table(df, sector_filter=None, company_filter=None):
         ],
         style={"width": "100%", "borderCollapse": "collapse", "background": "#ffffff", "border": "1px solid #e2e8f0", "borderRadius": "8px"},
     )
+    page_label = f"Showing {start + 1}-{min(end, total_rows)} of {total_rows} companies"
+    has_prev = page_index > 0
+    has_next = page_index < (total_pages - 1)
+    return table, page_label, not has_prev, not has_next, page_index
 
 
-def _dropdown(component_id, options, value, label):
+def _dropdown(component_id, options, value, label, multi=True):
     return html.Div(
-        style={"display": "flex", "alignItems": "center", "gap": "8px"},
+        style={"display": "flex", "alignItems": "center", "gap": "8px", "flex": "1 1 0", "minWidth": "0"},
         children=[
-            html.Label(label, style={"color": "#4f6275", "fontSize": "12px", "whiteSpace": "nowrap"}),
+            html.Label(label, style={"color": "#4f6275", "fontSize": "12px", "whiteSpace": "nowrap", "flex": "0 0 auto"}),
             dcc.Dropdown(
                 id=component_id,
                 options=options,
                 value=value,
-                multi=True,
+                multi=multi,
                 clearable=True,
-                style={"width": "260px", "fontSize": "12px", "background": "#ffffff"},
+                style={"width": "100%", "minWidth": "0", "fontSize": "12px", "background": "#ffffff"},
             ),
         ],
     )
@@ -283,6 +300,12 @@ def render_page1(stock):
 
     sectors = sorted(stock["sector"].dropna().unique().tolist())
     companies = sorted(stock["ticker"].dropna().unique().tolist())
+    signal_options = [
+        {"label": "Growing", "value": "Growing"},
+        {"label": "Declining", "value": "Declining"},
+        {"label": "Flat", "value": "Flat"},
+        {"label": "No Data", "value": "No Data"},
+    ]
 
     return html.Div(
         [
@@ -295,13 +318,28 @@ def render_page1(stock):
                     html.Div(
                         children=[
                             html.Div(
-                                style={"display": "flex", "gap": "12px", "marginBottom": "10px", "flexWrap": "wrap"},
+                                style={"display": "flex", "gap": "10px", "marginBottom": "10px", "flexWrap": "nowrap", "alignItems": "center"},
                                 children=[
                                     _dropdown("p1-sector-dd", [{"label": value, "value": value} for value in sectors], [], "Sector"),
                                     _dropdown("p1-company-dd", [{"label": value, "value": value} for value in companies], [], "Company"),
+                                    _dropdown("p1-signal-dd", signal_options, [], "Growth Signal"),
                                 ],
                             ),
-                            html.Div(id="p1-table-container", children=_company_table(stock)),
+                            html.Div(
+                                style={"display": "flex", "justifyContent": "space-between", "alignItems": "center", "marginBottom": "8px", "gap": "12px"},
+                                children=[
+                                    html.Div(id="p1-page-info", style={"color": "#607080", "fontSize": "12px"}),
+                                    html.Div(
+                                        style={"display": "flex", "gap": "8px"},
+                                        children=[
+                                            html.Button("◀", id="p1-prev-page", n_clicks=0, style={"padding": "4px 10px", "border": "1px solid #d6dde6", "background": "#ffffff", "borderRadius": "6px", "cursor": "pointer"}),
+                                            html.Button("▶", id="p1-next-page", n_clicks=0, style={"padding": "4px 10px", "border": "1px solid #d6dde6", "background": "#ffffff", "borderRadius": "6px", "cursor": "pointer"}),
+                                        ],
+                                    ),
+                                ],
+                            ),
+                            html.Div(id="p1-table-container", children=_company_table(stock)[0]),
+                            dcc.Store(id="p1-page-index", data=0),
                         ]
                     ),
                 ],
@@ -313,10 +351,37 @@ def render_page1(stock):
 def register_page1_callbacks(app, stock_df):
     @app.callback(
         Output("p1-table-container", "children"),
+        Output("p1-page-info", "children"),
+        Output("p1-prev-page", "disabled"),
+        Output("p1-next-page", "disabled"),
+        Output("p1-page-index", "data"),
         Input("p1-sector-dd", "value"),
         Input("p1-company-dd", "value"),
+        Input("p1-signal-dd", "value"),
+        Input("p1-prev-page", "n_clicks"),
+        Input("p1-next-page", "n_clicks"),
+        State("p1-page-index", "data"),
     )
-    def update_table(sector_values, company_values):
+    def update_table(sector_values, company_values, signal_values, prev_clicks, next_clicks, page_index):
+        trigger = dash.callback_context.triggered[0]["prop_id"].split(".")[0] if dash.callback_context.triggered else ""
         sectors = sector_values if isinstance(sector_values, list) else ([sector_values] if sector_values else [])
         companies = company_values if isinstance(company_values, list) else ([company_values] if company_values else [])
-        return _company_table(stock_df, sectors, companies)
+        signals = signal_values if isinstance(signal_values, list) else ([signal_values] if signal_values else [])
+
+        current_page = int(page_index or 0)
+        if trigger == "p1-prev-page":
+            current_page = max(0, current_page - 1)
+        elif trigger == "p1-next-page":
+            current_page += 1
+        else:
+            current_page = 0
+
+        table, info, prev_disabled, next_disabled, current_page = _company_table(
+            stock_df,
+            sectors,
+            companies,
+            signals,
+            current_page,
+            PAGE_SIZE,
+        )
+        return table, info, prev_disabled, next_disabled, current_page

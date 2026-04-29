@@ -64,12 +64,12 @@ def verify_price_history_consistency() -> bool:
 
 def run_step(script_name: str) -> None:
     project_root = Path(__file__).resolve().parent
-    script_path = project_root / script_name
+    module_name = Path(script_name).with_suffix("").as_posix().replace("/", ".").replace("\\", ".")
 
     print(f"\n=== Running {script_name} ===")
     logging.info(f"Starting {script_name}")
 
-    completed = subprocess.run([sys.executable, str(script_path)], check=False)
+    completed = subprocess.run([sys.executable, "-m", module_name], cwd=project_root, check=False)
     if completed.returncode != 0:
         logging.error(f"{script_name} failed with exit code {completed.returncode}")
         raise SystemExit(completed.returncode)
@@ -79,14 +79,14 @@ def run_step(script_name: str) -> None:
 
 
 def main() -> None:
-    run_step("collect_data.py")
-    run_step("clean_data.py")
-    run_step("indicators.py")
+    run_step(r"data_pipeline\collect_data.py")
+    run_step(r"data_pipeline\clean_data.py")
+    run_step(r"data_pipeline\price_history_builder.py")
 
     # If latest snapshot is not in price_history for some tickers, retry indicators once.
     if not verify_price_history_consistency():
-        print("↻ Retrying indicators.py once to recover missing price_history rows...")
-        run_step("indicators.py")
+        print("↻ Retrying data_pipeline/price_history_builder.py once to recover missing price_history rows...")
+        run_step(r"data_pipeline\price_history_builder.py")
         if not verify_price_history_consistency():
             logging.error("Pipeline failed: latest snapshot not fully reflected in price_history")
             raise SystemExit(1)

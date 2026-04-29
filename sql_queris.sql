@@ -32,3 +32,6 @@ WHERE DATE(date) = CURRENT_DATE-2;
 
 select * from price_history
 where ticker = 'AXISBANK';
+
+select * from stock_data
+where volume_ratio > 2;
