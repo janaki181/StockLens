@@ -93,12 +93,6 @@ Data Collection → Data Cleaning → Feature Engineering → Database → Dashb
 
 ---
 
-## 🧠 Future Improvements
-
-* Add scoring/ranking system
-* Real-time streaming data
-
----
 
 ## 🏁 Conclusion
 
